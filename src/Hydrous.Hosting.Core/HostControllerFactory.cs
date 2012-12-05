@@ -21,14 +21,14 @@ namespace Hydrous.Hosting
 
     interface IHostControllerFactory
     {
-        IHostController CreateController(IServiceController controller, ServiceDirectory directory);
+        IHostController CreateController(ServiceDirectory directory);
     }
 
     class HostControllerFactory : IHostControllerFactory
     {
-        public IHostController CreateController(IServiceController controller, ServiceDirectory directory)
+        public IHostController CreateController(ServiceDirectory directory)
         {
-            return new HostController(controller, directory);
+            return new HostController(directory);
         }
     }
 }

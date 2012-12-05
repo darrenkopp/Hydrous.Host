@@ -41,7 +41,7 @@ namespace Hydrous.Hosting
         public void Run(IStartupArguments args)
         {
             // create hosts for directories found by scanner
-            foreach (var host in DirectoryScanner.Scan().Select(directory => HostFactory.CreateController(this, directory)))
+            foreach (var host in DirectoryScanner.Scan().Select(directory => HostFactory.CreateController(directory)))
                 Hosts.Add(host);
 
             // start and wait for hosts
@@ -68,7 +68,6 @@ namespace Hydrous.Hosting
             {
                 try
                 {
-                    host.Initialize();
                     host.Start(args);
                 }
                 catch (Exception ex)

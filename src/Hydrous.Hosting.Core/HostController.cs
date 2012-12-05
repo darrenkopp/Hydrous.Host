@@ -26,30 +26,43 @@ namespace Hydrous.Hosting
         static readonly ILog log = LogManager.GetLogger(typeof(HostController));
 
         readonly object locker = new object();
-        readonly IServiceController _Controller;
-        readonly AppDomain Domain;
+        readonly ServiceDirectory Directory;
+        readonly IIntervalTask MonitoringTask;
 
-        public HostController(IServiceController controller, ServiceDirectory directory)
+        public HostController(ServiceDirectory directory)
         {
-            _Controller = controller;
-            Name = directory.Folder.Name;
+            Directory = directory;
             Status = HostStatus.Created;
+            Name = directory.Folder.Name;
 
-            // create our app domain
-            var setup = AppDomain.CurrentDomain.SetupInformation;
-            setup.ShadowCopyFiles = "true";
-            setup.ConfigurationFile = directory.ConfigurationFile.FullName;
-            setup.ApplicationBase = directory.Folder.FullName;
-
-            log.Debug(string.Format("[{0}] Creating AppDomain.", Name));
-            Domain = AppDomain.CreateDomain("ServiceHost." + Name, null, setup);
+            MonitoringTask = new IntervalTask("HostMonitor", CheckStatus, TimeSpan.FromMinutes(1));
         }
 
-        private ServiceBootstrapper Bootstrapper { get; set; }
+        private bool IsDisposed { get; set; }
+
+        private DomainHostedObject<ServiceBootstrapper> Bootstrapper { get; set; }
 
         public HostStatus Status { get; private set; }
 
         public string Name { get; private set; }
+
+        private IStartupArguments StartArguments { get; set; }
+
+        void CheckStatus()
+        {
+            // if running or stopped, don't bother
+            if (Status == HostStatus.Running || Status == HostStatus.Stopped) return;
+
+            try
+            {
+                Initialize();
+                Start();
+            }
+            catch (Exception ex)
+            {
+                log.Error("Failed to run status check operations on service.", ex);
+            }
+        }
 
         public void Initialize()
         {
@@ -58,44 +71,57 @@ namespace Hydrous.Hosting
                 if (Status == HostStatus.Created)
                 {
                     WriteLog("Creating bootstrapper.", log.Debug);
-
-                    var bootstrapperType = typeof(ServiceBootstrapper);
-                    Bootstrapper = (ServiceBootstrapper)Domain.CreateInstanceAndUnwrap(
-                        assemblyName: bootstrapperType.Assembly.FullName,
-                        typeName: bootstrapperType.FullName,
-                        ignoreCase: true,
-                        bindingAttr: System.Reflection.BindingFlags.Default,
-                        binder: null,
-                        args: null,
-                        culture: System.Globalization.CultureInfo.CurrentCulture,
-                        activationAttributes: null,
-                        securityAttributes: null
+                    Bootstrapper = new DomainHostedObject<ServiceBootstrapper>(
+                        applicationBase: Directory.Folder.FullName,
+                        configurationFile: Directory.ConfigurationFile.FullName,
+                        domainName: "ServiceHost." + Name
                     );
 
                     WriteLog("Initializing service.");
-                    Bootstrapper.Initialize();
+                    Bootstrapper.Instance.Initialize();
+
                     Status = HostStatus.Initialized;
+                }
+            }
+        }
+
+        void Start()
+        {
+            lock (locker)
+            {
+                if (Status == HostStatus.Initialized)
+                {
+                    var startingStatus = Status;
+                    try
+                    {
+                        WriteLog("Starting service.");
+                        Status = HostStatus.Starting;
+                        Bootstrapper.Instance.Start();
+
+                        Status = HostStatus.Running;
+                        WriteLog("Service running.");
+                    }
+                    catch (Exception ex)
+                    {
+                        log.Error("Failed to start service.", ex);
+
+                        // cleanup our bootstrapper
+                        CleanupBootstrapper();
+                    }
                 }
             }
         }
 
         public void Start(IStartupArguments arguments)
         {
-            lock (locker)
-            {
-                if (Status == HostStatus.Initialized || Status == HostStatus.Stopped)
-                {
-                    WriteLog("Starting service.");
-                    Status = HostStatus.Starting;
-                    Bootstrapper.Start();
+            StartArguments = arguments;
+            MonitoringTask.Start();
 
-                    Status = HostStatus.Running;
-                    WriteLog("Service running.");
-                }
-            }
+            Initialize();
+            Start();
         }
 
-        public void Stop(IShutdownArguments arguments)
+        void Stop()
         {
             lock (locker)
             {
@@ -103,17 +129,25 @@ namespace Hydrous.Hosting
                 {
                     if (Status == HostStatus.Running)
                     {
-                        WriteLog("Stopping service.", log.Debug);
+                        WriteLog("Stopping service.");
                         Status = HostStatus.Stopping;
-                        Bootstrapper.Stop();
+                        Bootstrapper.Instance.Stop();
                     }
                 }
                 finally
                 {
+                    CleanupBootstrapper();
+
                     Status = HostStatus.Stopped;
                     WriteLog("Service stopped.");
                 }
             }
+        }
+
+        public void Stop(IShutdownArguments arguments)
+        {
+            MonitoringTask.Stop();
+            Stop();
         }
 
         void WriteLog(string message, Action<object> callback = null)
@@ -125,18 +159,58 @@ namespace Hydrous.Hosting
 
         public void Dispose()
         {
-            try
+            // only dispose once
+            if (IsDisposed) return;
+            IsDisposed = true;
+
+            // run disposal operations
+            All(CleanupMonitor, CleanupBootstrapper);
+        }
+
+        static void All(params Action[] operations)
+        {
+            if (operations == null || operations.Length == 0)
+                return;
+
+            foreach (var operation in operations)
             {
-                if (Bootstrapper != null)
+                try
                 {
-                    WriteLog("Service disposing.", log.Debug);
-                    Bootstrapper.Dispose();
+                    operation();
+                }
+                catch (Exception ex)
+                {
+                    log.Warn("Failed to execute disposal operation.", ex);
                 }
             }
-            finally
+        }
+
+        void CleanupMonitor()
+        {
+            if (MonitoringTask != null)
+                MonitoringTask.Dispose();
+        }
+
+        void CleanupBootstrapper()
+        {
+            if (Bootstrapper != null)
             {
-                WriteLog("Unloading AppDomain.", log.Debug);
-                AppDomain.Unload(Domain);
+                WriteLog("Destroying bootstrapper.", log.Debug);
+
+                try
+                {
+                    Bootstrapper.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    log.Error("An error was encountered while disposing of bootstrapper.", ex);
+                }
+                finally
+                {
+                    // reset status back to "created" since we no longer have bootstrapper
+                    Status = HostStatus.Created;
+                    Bootstrapper = null;
+                }
             }
         }
     }
