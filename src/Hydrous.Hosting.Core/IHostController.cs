@@ -23,8 +23,6 @@ namespace Hydrous.Hosting
 
         HostStatus Status { get; }
 
-        void Initialize();
-
         void Start(IStartupArguments arguments);
 
         void Stop(IShutdownArguments arguments);

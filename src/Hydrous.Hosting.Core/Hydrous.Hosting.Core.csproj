@@ -51,6 +51,7 @@
     <Compile Include="DefaultShutdownArguments.cs" />
     <Compile Include="DefaultStartupArguments.cs" />
     <Compile Include="DisposableExtensions.cs" />
+    <Compile Include="DomainHostedObject.cs" />
     <Compile Include="FileSystem\IServiceDirectoryScanner.cs" />
     <Compile Include="FileSystem\ServiceDirectory.cs" />
     <Compile Include="FileSystem\ServiceDirectoryScanner.cs" />
@@ -60,6 +61,7 @@
     <Compile Include="IHostController.cs">
       <DependentUpon>HostController.cs</DependentUpon>
     </Compile>
+    <Compile Include="IntervalTask.cs" />
     <Compile Include="IStartupArguments.cs" />
     <Compile Include="IServiceController.cs" />
     <Compile Include="IShutdownArguments.cs" />
