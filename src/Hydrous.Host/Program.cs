@@ -30,16 +30,18 @@ namespace Hydrous.Host
         [LoaderOptimization(LoaderOptimization.MultiDomain)]
         static void Main(string[] args)
         {
+            bool forceInteractive = args.Any(x => string.Equals("--interactive", x, StringComparison.OrdinalIgnoreCase));
             log4net.Config.XmlConfigurator.ConfigureAndWatch(new FileInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log4net.config")));
             using (var controller = ControllerFactory.Create())
             {
-                if (Environment.UserInteractive)
+                if (forceInteractive || Environment.UserInteractive)
                 {
                     Console.WriteLine("Starting up as console application.");
                     RunInteractive(args, controller);
                 }
                 else
                 {
+                    log.Debug("Starting as windows service");
                     // if we aren't interactive, then we should run as a service
                     ServiceBase.Run(new HydrousService(controller));
                 }
