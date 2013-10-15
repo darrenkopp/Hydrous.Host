@@ -32,6 +32,8 @@ namespace Hydrous.Host
         {
             bool forceInteractive = args.Any(x => string.Equals("--interactive", x, StringComparison.OrdinalIgnoreCase));
             log4net.Config.XmlConfigurator.ConfigureAndWatch(new FileInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "log4net.config")));
+            AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+
             using (var controller = ControllerFactory.Create())
             {
                 if (forceInteractive || Environment.UserInteractive)
@@ -43,12 +45,18 @@ namespace Hydrous.Host
                 {
                     log.Debug("Starting as windows service");
                     // if we aren't interactive, then we should run as a service
-                    ServiceBase.Run(new HydrousService(controller));
+                    var service = new HydrousService(controller);
+                    ServiceBase.Run(service);
                 }
             }
 
             log.Info("All services shutdown.");
             Environment.ExitCode = 0;
+        }
+
+        static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            log.Fatal("Unhandled exception", e.ExceptionObject as Exception);
         }
 
         private static void RunInteractive(string[] args, IServiceController controller)
